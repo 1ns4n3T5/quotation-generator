@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "QuotationItem": {
+      "title": "QuotationItem",
+      "description": "An item in a quotation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "particulars": { "type": "string" },
+        "dimension": { "type": "string" },
+        "qty": { "type": "number" },
+        "squareFeet": { "type": "number" },
+        "rate": { "type": "number" },
+        "amount": { "type": "number" },
+        "remark": { "type": "string" }
+      }
+    },
+    "Quotation": {
+      "title": "Quotation",
+      "description": "A quotation document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "quotationNumber": { "type": "string" },
+        "date": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/entities/QuotationItem" }
+        },
+        "materials": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "remarks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "signOff": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "quotationNumber", "date"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User specific settings like header logo",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "headerImage": { "type": "string" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/quotations/{quotationId}": {
+      "schema": "#/entities/Quotation",
+      "description": "User quotations"
+    },
+    "/settings/{userId}": {
+      "schema": "#/entities/UserSettings",
+      "description": "User settings"
+    }
+  }
+}

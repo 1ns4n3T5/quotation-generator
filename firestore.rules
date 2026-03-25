@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: quotations
+    // Document ID: {quotationId}
+    // Fields:
+    //   - userId: string (required) - owner of the quotation
+    //   - quotationNumber: string (required)
+    //   - date: string (required)
+    //   - items: list (optional)
+    //   - materials: list (optional)
+    //   - remarks: list (optional)
+    //   - signOff: list (optional)
+    //   - createdAt: number (optional)
+    //
+    // Collection: settings
+    // Document ID: {userId}
+    // Fields:
+    //   - userId: string (required) - owner of the settings
+    //   - headerImage: string (optional) - base64 string
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+    function uidUnchanged() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid;
+    }
+    function uidNotModified() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId;
+    }
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    
+    // Domain Validators
+    function isValidQuotation(data) {
+      return data.keys().hasAll(['userId', 'quotationNumber', 'date']) &&
+             data.userId is string &&
+             data.quotationNumber is string && data.quotationNumber.size() < 100 &&
+             data.date is string && data.date.size() < 50 &&
+             (!('id' in data) || data.id is string) &&
+             (!('items' in data) || data.items is list) &&
+             (!('materials' in data) || data.materials is list) &&
+             (!('remarks' in data) || data.remarks is list) &&
+             (!('signOff' in data) || data.signOff is list) &&
+             (!('createdAt' in data) || data.createdAt is number) &&
+             (!('discount' in data) || (data.discount is string && data.discount.size() < 50));
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['userId']) &&
+             data.userId is string &&
+             (!('headerImage' in data) || (data.headerImage is string && data.headerImage.size() < 1048576)); // 1MB limit
+    }
+
+    match /quotations/{quotationId} {
+      allow read: if isAuthenticated() && isDocOwner();
+      allow create: if isAuthenticated() && isValidQuotation(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isDocOwner() && isValidQuotation(request.resource.data) && uidNotModified();
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /settings/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidSettings(request.resource.data) && uidUnchanged();
+      allow update: if isOwner(userId) && isValidSettings(request.resource.data) && uidNotModified();
+      allow delete: if isOwner(userId);
+    }
+  }
+}

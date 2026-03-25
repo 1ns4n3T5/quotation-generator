@@ -1,0 +1,5 @@
+{
+  "name": "Quotation Generator",
+  "description": "A quotation generator app for glass and aluminium fitting services, allowing users to input data and export as an image or PDF.",
+  "requestFramePermissions": []
+}
