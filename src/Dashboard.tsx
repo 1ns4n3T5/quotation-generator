@@ -3,14 +3,17 @@ import { QuotationData } from './App';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend } from 'recharts';
 import { format, parse, isValid, subDays, isAfter, startOfDay } from 'date-fns';
 import { FileText, DollarSign, TrendingUp, Calendar, Filter } from 'lucide-react';
+import { translations, Language } from './translations';
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#6B7280', '#F97316', '#06B6D4'];
 
 interface DashboardProps {
   quotations: QuotationData[];
+  language: Language;
 }
 
-export function Dashboard({ quotations }: DashboardProps) {
+export function Dashboard({ quotations, language }: DashboardProps) {
+  const t = translations[language];
   const [dateFilter, setDateFilter] = useState<'7days' | '30days' | 'all'>('all');
 
   const stats = useMemo(() => {
@@ -87,7 +90,7 @@ export function Dashboard({ quotations }: DashboardProps) {
     if (allItems.length > 8) {
       const top = allItems.slice(0, 8);
       const othersValue = allItems.slice(8).reduce((sum, item) => sum + item.value, 0);
-      topItems = [...top, { name: 'Others', value: othersValue }];
+      topItems = [...top, { name: t.others, value: othersValue }];
     }
 
     return {
@@ -99,7 +102,7 @@ export function Dashboard({ quotations }: DashboardProps) {
       topItems,
       filteredQuotations
     };
-  }, [quotations, dateFilter]);
+  }, [quotations, dateFilter, t.others]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -113,25 +116,25 @@ export function Dashboard({ quotations }: DashboardProps) {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Overview Dashboard</h2>
+        <h2 className="text-2xl font-bold text-gray-800">{t.dashboard}</h2>
         <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
           <button 
             onClick={() => setDateFilter('7days')}
             className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === '7days' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}
           >
-            Last 7 Days
+            {t.last7Days}
           </button>
           <button 
             onClick={() => setDateFilter('30days')}
             className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === '30days' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}
           >
-            Last 30 Days
+            {t.last30Days}
           </button>
           <button 
             onClick={() => setDateFilter('all')}
             className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === 'all' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}
           >
-            All Time
+            {t.allTime}
           </button>
         </div>
       </div>
@@ -143,7 +146,7 @@ export function Dashboard({ quotations }: DashboardProps) {
             <FileText size={24} />
           </div>
           <div>
-            <p className="text-sm text-gray-500 font-medium">Total Quotations</p>
+            <p className="text-sm text-gray-500 font-medium">{t.totalQuotations}</p>
             <p className="text-2xl font-bold text-gray-900">{stats.totalQuotations}</p>
           </div>
         </div>
@@ -153,7 +156,7 @@ export function Dashboard({ quotations }: DashboardProps) {
             <DollarSign size={24} />
           </div>
           <div>
-            <p className="text-sm text-gray-500 font-medium">Total Revenue</p>
+            <p className="text-sm text-gray-500 font-medium">{t.totalAmount}</p>
             <p className="text-2xl font-bold text-gray-900">{formatCurrency(stats.totalAmount)}</p>
           </div>
         </div>
@@ -163,7 +166,7 @@ export function Dashboard({ quotations }: DashboardProps) {
             <TrendingUp size={24} />
           </div>
           <div>
-            <p className="text-sm text-gray-500 font-medium">Average Value</p>
+            <p className="text-sm text-gray-500 font-medium">{t.averageQuotation}</p>
             <p className="text-2xl font-bold text-gray-900">{formatCurrency(stats.averageAmount)}</p>
           </div>
         </div>
@@ -173,7 +176,7 @@ export function Dashboard({ quotations }: DashboardProps) {
             <Calendar size={24} />
           </div>
           <div>
-            <p className="text-sm text-gray-500 font-medium">Total Items Quoted</p>
+            <p className="text-sm text-gray-500 font-medium">{t.totalItemsQuoted}</p>
             <p className="text-2xl font-bold text-gray-900">{stats.totalItems}</p>
           </div>
         </div>
@@ -183,7 +186,7 @@ export function Dashboard({ quotations }: DashboardProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">
-            Revenue {dateFilter === 'all' ? 'by Month' : 'by Date'}
+            {t.revenueTrend}
           </h3>
           <div className="h-80">
             {stats.trendData.length > 0 ? (
@@ -205,14 +208,14 @@ export function Dashboard({ quotations }: DashboardProps) {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex items-center justify-center text-gray-400">
-                No data available yet
+                {t.noDataAvailable}
               </div>
             )}
           </div>
         </div>
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Quotation Trend</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">{t.quotationTrend}</h3>
           <div className="h-80">
             {stats.trendData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -232,7 +235,7 @@ export function Dashboard({ quotations }: DashboardProps) {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex items-center justify-center text-gray-400">
-                No data available yet
+                {t.noDataAvailable}
               </div>
             )}
           </div>
@@ -240,7 +243,7 @@ export function Dashboard({ quotations }: DashboardProps) {
 
         {/* Most Used Items Pie Chart */}
         <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-200 lg:col-span-2">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Most Used Items (by Quantity)</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">{t.mostUsedItems}</h3>
           <div className="h-[450px] sm:h-96">
             {stats.topItems.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -265,7 +268,7 @@ export function Dashboard({ quotations }: DashboardProps) {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex items-center justify-center text-gray-400">
-                No item data available yet
+                {t.noItemDataAvailable}
               </div>
             )}
           </div>
@@ -274,15 +277,15 @@ export function Dashboard({ quotations }: DashboardProps) {
       
       {/* Recent Quotations List */}
       <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-200 mt-6">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">Recent Quotations</h3>
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">{t.recentQuotations}</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[500px]">
             <thead>
               <tr className="border-b border-gray-200 text-sm text-gray-500">
-                <th className="pb-3 pr-4 font-medium whitespace-nowrap">Quotation No.</th>
-                <th className="pb-3 pr-4 font-medium whitespace-nowrap">Date</th>
-                <th className="pb-3 pr-4 font-medium whitespace-nowrap">Items</th>
-                <th className="pb-3 font-medium text-right whitespace-nowrap">Total Amount</th>
+                <th className="pb-3 pr-4 font-medium whitespace-nowrap">{t.quotationNo}</th>
+                <th className="pb-3 pr-4 font-medium whitespace-nowrap">{t.date}</th>
+                <th className="pb-3 pr-4 font-medium whitespace-nowrap">{t.items}</th>
+                <th className="pb-3 font-medium text-right whitespace-nowrap">{t.amount}</th>
               </tr>
             </thead>
             <tbody>
@@ -290,7 +293,7 @@ export function Dashboard({ quotations }: DashboardProps) {
                 const total = q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) - (Number(q.discount) || 0);
                 return (
                   <tr key={q.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                    <td className="py-3 pr-4 font-medium text-gray-900 whitespace-nowrap">{q.quotationNumber || 'Untitled'}</td>
+                    <td className="py-3 pr-4 font-medium text-gray-900 whitespace-nowrap">{q.quotationNumber || t.untitled}</td>
                     <td className="py-3 pr-4 text-gray-600 whitespace-nowrap">{q.date}</td>
                     <td className="py-3 pr-4 text-gray-600 whitespace-nowrap">{q.items.length}</td>
                     <td className="py-3 text-right font-medium text-gray-900 whitespace-nowrap">{formatCurrency(total)}</td>
@@ -299,7 +302,7 @@ export function Dashboard({ quotations }: DashboardProps) {
               })}
               {stats.filteredQuotations.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-gray-500">No quotations found for the selected period.</td>
+                  <td colSpan={4} className="py-8 text-center text-gray-500">{t.noQuotationsFoundPeriod}</td>
                 </tr>
               )}
             </tbody>

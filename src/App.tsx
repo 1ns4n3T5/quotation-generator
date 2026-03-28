@@ -2,12 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import html2pdf from 'html2pdf.js';
-import { Plus, Trash2, Download, Printer, Image as ImageIcon, FileText, Save, FolderOpen, X, FilePlus, LogIn, LogOut, LayoutDashboard, CloudUpload, CloudDownload } from 'lucide-react';
+import { Plus, Trash2, Download, Printer, Image as ImageIcon, FileText, Save, FolderOpen, X, FilePlus, LogIn, LogOut, LayoutDashboard, CloudUpload, CloudDownload, Globe, Menu } from 'lucide-react';
 import { db, auth, loginWithGoogle, logout } from './firebase';
 import { collection, doc, setDoc, onSnapshot, query, where, orderBy, getDocs, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Dashboard } from './Dashboard';
 import { Toaster, toast } from 'sonner';
+import { translations, Language } from './translations';
 
 enum OperationType {
   CREATE = 'create',
@@ -72,6 +73,9 @@ export interface QuotationData {
 }
 
 export default function App() {
+  const [language, setLanguage] = useState<Language>('en');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const t = translations[language];
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [savedQuotations, setSavedQuotations] = useState<QuotationData[]>(() => {
@@ -101,18 +105,9 @@ export default function App() {
       quotationNumber: '',
       date: new Date().toLocaleDateString('en-GB').replace(/\//g, '.'),
       headerImage: savedLogo || null,
-      items: [
-        { id: '1', particulars: 'W1, Casement window', dimension: "5' x 5.5'", qty: 1, squareFeet: 27.5, rate: 38000, amount: 1045000, remark: '4mm solar green' },
-        { id: '2', particulars: 'W2, Slide window', dimension: "3' x 4'", qty: 2, squareFeet: 24, rate: 24000, amount: 576000, remark: '4mm solar green' },
-        { id: '3', particulars: 'W3, Slide window', dimension: "4' x 4'", qty: 6, squareFeet: 96, rate: 24000, amount: 2304000, remark: '4mm solar green' },
-        { id: '4', particulars: 'F(1) Fixed glass', dimension: "3' x 2'", qty: 2, squareFeet: '', rate: 180000, amount: 360000, remark: '4mm solar green' },
-        { id: '5', particulars: 'F1A Fixed glass', dimension: "3' x 2'", qty: 1, squareFeet: '', rate: 180000, amount: 180000, remark: '4mm solar green' },
-      ],
-      materials: ['728 Serial grey aluminum ( use materials )'],
-      remarks: [
-        '5mm clear glass = 4,642,500',
-        '5mm grey glass = 4,967,500'
-      ],
+      items: [],
+      materials: [],
+      remarks: [],
       signOff: ['Best Regards', 'Zaw Lin Aung', '09-420225277']
     };
   });
@@ -502,110 +497,258 @@ export default function App() {
     <div className="min-h-screen bg-gray-100 p-4 md:p-8 font-sans">
       <Toaster position="top-center" richColors duration={2000} />
       {/* Header Bar */}
-      <div className="max-w-7xl mx-auto mb-6 flex flex-col md:flex-row justify-between items-center gap-4 bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-gray-200">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-lg shadow-blue-200 shadow-lg">
-            <FileText className="text-white" size={20} />
+      <div className="max-w-7xl mx-auto mb-6 bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-gray-200">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 p-2 rounded-lg shadow-blue-200 shadow-lg">
+              <FileText className="text-white" size={20} />
+            </div>
+            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600">Quotation Generator</h1>
           </div>
-          <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600">Quotation Generator</h1>
-        </div>
-        <div className="w-full md:w-auto overflow-x-auto no-scrollbar">
-          {isAuthReady && (
-            user ? (
-              <div className="flex items-center gap-2 sm:gap-3 min-w-max">
-                <button
-                  onClick={() => setCurrentView(currentView === 'editor' ? 'dashboard' : 'editor')}
-                  className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl transition-all font-semibold ${
-                    currentView === 'editor' 
-                    ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' 
-                    : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                  }`}
-                >
-                  {currentView === 'editor' ? <><LayoutDashboard size={16} /> Dashboard</> : <><FileText size={16} /> Editor</>}
-                </button>
-                <button 
-                  onClick={backupToCloud}
-                  disabled={isSaving}
-                  className="flex items-center gap-2 text-sm bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl transition-all font-semibold disabled:opacity-50"
-                  title="Backup to Cloud"
-                >
-                  <CloudUpload size={16} /> <span className="hidden sm:inline">Backup</span>
-                </button>
-                <button 
-                  onClick={restoreFromCloud}
-                  disabled={isSaving}
-                  className="flex items-center gap-2 text-sm bg-sky-50 hover:bg-sky-100 text-sky-700 px-4 py-2 rounded-xl transition-all font-semibold disabled:opacity-50"
-                  title="Restore from Cloud"
-                >
-                  <CloudDownload size={16} /> <span className="hidden sm:inline">Restore</span>
-                </button>
-                <div className="flex items-center gap-2 ml-1 pl-3 border-l border-gray-200">
-                  <div className="hidden sm:block">
-                    {user.photoURL ? (
-                      <img 
-                        src={user.photoURL} 
-                        alt={user.displayName || 'User'} 
-                        className="w-9 h-9 rounded-full border-2 border-white shadow-sm"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
-                        {user.displayName?.charAt(0) || user.email?.charAt(0) || 'U'}
-                      </div>
-                    )}
+          
+          {/* Desktop Nav */}
+          <div className="hidden md:flex items-center gap-3">
+            {isAuthReady && (
+              user ? (
+                <div className="flex items-center gap-2 sm:gap-3 min-w-max">
+                  <div className="flex items-center bg-gray-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setLanguage('en')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'en' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> EN
+                    </button>
+                    <button
+                      onClick={() => setLanguage('my')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'my' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> MM
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setCurrentView(currentView === 'editor' ? 'dashboard' : 'editor')}
+                    className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl transition-all font-semibold ${
+                      currentView === 'editor' 
+                      ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' 
+                      : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    }`}
+                  >
+                    {currentView === 'editor' ? <><LayoutDashboard size={16} /> {t.dashboard}</> : <><FileText size={16} /> {t.editor}</>}
+                  </button>
+                  <button 
+                    onClick={backupToCloud}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 text-sm bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl transition-all font-semibold disabled:opacity-50"
+                    title={t.backup}
+                  >
+                    <CloudUpload size={16} /> <span className="hidden sm:inline">{t.backup}</span>
+                  </button>
+                  <button 
+                    onClick={restoreFromCloud}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 text-sm bg-sky-50 hover:bg-sky-100 text-sky-700 px-4 py-2 rounded-xl transition-all font-semibold disabled:opacity-50"
+                    title={t.restore}
+                  >
+                    <CloudDownload size={16} /> <span className="hidden sm:inline">{t.restore}</span>
+                  </button>
+                  <div className="flex items-center gap-2 ml-1 pl-3 border-l border-gray-200">
+                    <div className="hidden sm:block">
+                      {user.photoURL ? (
+                        <img 
+                          src={user.photoURL} 
+                          alt={user.displayName || 'User'} 
+                          className="w-9 h-9 rounded-full border-2 border-white shadow-sm"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                          {user.displayName?.charAt(0) || user.email?.charAt(0) || 'U'}
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      onClick={logout}
+                      className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                      title="Sign Out"
+                    >
+                      <LogOut size={18} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 sm:gap-3 min-w-max">
+                  <div className="flex items-center bg-gray-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setLanguage('en')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'en' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> EN
+                    </button>
+                    <button
+                      onClick={() => setLanguage('my')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'my' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> MM
+                    </button>
                   </div>
                   <button 
-                    onClick={logout}
-                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
-                    title="Sign Out"
+                    onClick={loginWithGoogle}
+                    className="flex items-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95 font-semibold"
                   >
-                    <LogOut size={18} />
+                    <LogIn size={18} /> {t.signInToBackup}
                   </button>
                 </div>
-              </div>
-            ) : (
-              <button 
-                onClick={loginWithGoogle}
-                className="flex items-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl transition-all shadow-md hover:shadow-lg active:scale-95 font-semibold"
-              >
-                <LogIn size={18} /> Sign in to Backup
-              </button>
-            )
-          )}
+              )
+            )}
+          </div>
+
+          {/* Mobile Menu Toggle */}
+          <div className="md:hidden flex items-center gap-2">
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
+          </div>
         </div>
+
+        {/* Mobile Nav */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden pt-4 mt-4 border-t border-gray-100 flex flex-col gap-3">
+            {isAuthReady && (
+              user ? (
+                <>
+                  <div className="flex items-center bg-gray-100 p-1 rounded-xl self-start">
+                    <button
+                      onClick={() => setLanguage('en')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'en' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> EN
+                    </button>
+                    <button
+                      onClick={() => setLanguage('my')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'my' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> MM
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setCurrentView(currentView === 'editor' ? 'dashboard' : 'editor');
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`flex items-center justify-center gap-2 text-sm px-4 py-3 rounded-xl transition-all font-semibold w-full ${
+                      currentView === 'editor' 
+                      ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' 
+                      : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    }`}
+                  >
+                    {currentView === 'editor' ? <><LayoutDashboard size={16} /> {t.dashboard}</> : <><FileText size={16} /> {t.editor}</>}
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={() => { backupToCloud(); setIsMobileMenuOpen(false); }}
+                      disabled={isSaving}
+                      className="flex items-center justify-center gap-2 text-sm bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-3 rounded-xl transition-all font-semibold disabled:opacity-50"
+                    >
+                      <CloudUpload size={16} /> {t.backup}
+                    </button>
+                    <button 
+                      onClick={() => { restoreFromCloud(); setIsMobileMenuOpen(false); }}
+                      disabled={isSaving}
+                      className="flex items-center justify-center gap-2 text-sm bg-sky-50 hover:bg-sky-100 text-sky-700 px-4 py-3 rounded-xl transition-all font-semibold disabled:opacity-50"
+                    >
+                      <CloudDownload size={16} /> {t.restore}
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-3 pt-3 mt-1 border-t border-gray-100">
+                    <div className="flex items-center gap-3">
+                      {user.photoURL ? (
+                        <img 
+                          src={user.photoURL} 
+                          alt={user.displayName || 'User'} 
+                          className="w-10 h-10 rounded-full border-2 border-white shadow-sm"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                          {user.displayName?.charAt(0) || user.email?.charAt(0) || 'U'}
+                        </div>
+                      )}
+                      <div className="flex flex-col overflow-hidden">
+                        <span className="text-sm font-semibold text-gray-800 truncate">{user.displayName || 'User'}</span>
+                        <span className="text-xs text-gray-500 truncate">{user.email}</span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => { logout(); setIsMobileMenuOpen(false); }}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-all w-full"
+                    >
+                      <LogOut size={16} /> Sign Out
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center bg-gray-100 p-1 rounded-xl self-start">
+                    <button
+                      onClick={() => setLanguage('en')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'en' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> EN
+                    </button>
+                    <button
+                      onClick={() => setLanguage('my')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${language === 'my' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      <Globe size={14} /> MM
+                    </button>
+                  </div>
+                  <button 
+                    onClick={() => { loginWithGoogle(); setIsMobileMenuOpen(false); }}
+                    className="flex items-center justify-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl transition-all shadow-md font-semibold w-full"
+                  >
+                    <LogIn size={18} /> {t.signInToBackup}
+                  </button>
+                </>
+              )
+            )}
+          </div>
+        )}
       </div>
 
       {currentView === 'dashboard' ? (
-        <Dashboard quotations={savedQuotations} />
+        <Dashboard quotations={savedQuotations} language={language} />
       ) : (
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
           
           {/* Form Section */}
           <div className="lg:col-span-4 xl:col-span-5 bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-200 h-fit">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Editor</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-800">{t.editor}</h2>
             <div className="flex flex-row flex-nowrap gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
               <button 
                 onClick={createNewQuotation} 
                 className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-md border border-gray-200 transition-colors whitespace-nowrap" 
-                title="New Quotation"
+                title={t.new}
               >
-                <FilePlus size={18} /> <span className="text-sm font-medium">New</span>
+                <FilePlus size={18} /> <span className="text-sm font-medium">{t.new}</span>
               </button>
               <button 
                 onClick={() => setShowSavedModal(true)} 
                 className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-md border border-gray-200 transition-colors whitespace-nowrap" 
-                title="Open Saved"
+                title={t.open}
               >
-                <FolderOpen size={18} /> <span className="text-sm font-medium">Open</span>
+                <FolderOpen size={18} /> <span className="text-sm font-medium">{t.open}</span>
               </button>
               <button 
                 onClick={saveQuotation} 
                 disabled={isSaving}
                 className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-gray-200 transition-colors whitespace-nowrap ${isSaving ? 'text-gray-400 bg-gray-100' : 'text-blue-600 hover:bg-blue-50'}`} 
-                title="Save Locally"
+                title={t.save}
               >
-                <Save size={18} /> <span className="text-sm font-medium">{isSaving ? 'Saving...' : 'Save'}</span>
+                <Save size={18} /> <span className="text-sm font-medium">{isSaving ? t.saving : t.save}</span>
               </button>
             </div>
           </div>
@@ -613,13 +756,13 @@ export default function App() {
           <div className="space-y-4">
             <div className="mb-2">
               <div className="flex justify-between items-center mb-1">
-                <label className="block text-sm font-medium text-gray-700">Header Logo Image</label>
+                <label className="block text-sm font-medium text-gray-700">{t.headerLogoImage}</label>
                 {data.headerImage && (
                   <button 
                     onClick={removeLogo}
                     className="text-xs text-red-600 hover:underline"
                   >
-                    Remove Logo
+                    {t.removeLogo}
                   </button>
                 )}
               </div>
@@ -641,7 +784,7 @@ export default function App() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Quotation No.</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t.quotationNo}</label>
                 <input 
                   type="text" 
                   value={data.quotationNumber} 
@@ -651,7 +794,7 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t.date}</label>
                 <input 
                   type="text" 
                   value={data.date} 
@@ -663,9 +806,9 @@ export default function App() {
 
             <div className="pt-4 border-t border-gray-200">
               <div className="flex justify-between items-center mb-3">
-                <h3 className="text-lg font-semibold text-gray-800">Items</h3>
+                <h3 className="text-lg font-semibold text-gray-800">{t.items}</h3>
                 <button onClick={addItem} className="text-sm bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1">
-                  <Plus size={16} /> Add Item
+                  <Plus size={16} /> {t.addItem}
                 </button>
               </div>
               
@@ -680,34 +823,34 @@ export default function App() {
                     </button>
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
                       <div className="sm:col-span-12">
-                        <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">Particulars</label>
-                        <input type="text" value={item.particulars} onChange={e => handleItemChange(item.id, 'particulars', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="Item name..." />
+                        <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.particulars}</label>
+                        <input type="text" value={item.particulars} onChange={e => handleItemChange(item.id, 'particulars', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.itemName} />
                       </div>
                       <div className="grid grid-cols-2 sm:contents gap-3">
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">Dimension</label>
-                          <input type="text" value={item.dimension} onChange={e => handleItemChange(item.id, 'dimension', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="Size..." />
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.dimension}</label>
+                          <input type="text" value={item.dimension} onChange={e => handleItemChange(item.id, 'dimension', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.size} />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">Qty</label>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.qty}</label>
                           <input type="number" value={item.qty} onChange={e => handleItemChange(item.id, 'qty', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">Sq. Feet</label>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.sqFeet}</label>
                           <input type="number" value={item.squareFeet} onChange={e => handleItemChange(item.id, 'squareFeet', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 sm:contents gap-3">
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">Rate</label>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.rate}</label>
                           <input type="number" value={item.rate} onChange={e => handleItemChange(item.id, 'rate', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white font-semibold text-blue-600" />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">Amount</label>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.amount}</label>
                           <input type="number" value={item.amount} onChange={e => handleItemChange(item.id, 'amount', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-100 font-bold" readOnly />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">Remark</label>
+                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.remark}</label>
                           <input type="text" value={item.remark} onChange={e => handleItemChange(item.id, 'remark', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="..." />
                         </div>
                       </div>
@@ -718,9 +861,9 @@ export default function App() {
             </div>
 
             <div className="pt-4 border-t border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-800 mb-3">Discount</h3>
+              <h3 className="text-lg font-semibold text-gray-800 mb-3">{t.discount}</h3>
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Discount Amount (Ks)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t.discountAmount}</label>
                 <input
                   type="number"
                   value={data.discount || ''}
@@ -732,13 +875,13 @@ export default function App() {
             </div>
 
             <div className="pt-4 border-t border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-800 mb-3">Footer Info</h3>
+              <h3 className="text-lg font-semibold text-gray-800 mb-3">{t.footerInfo}</h3>
               
               <div className="mb-4">
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Materials Used</label>
+                  <label className="block text-lg font-semibold text-gray-800">{t.materialsUsed}</label>
                   <button onClick={addMaterial} className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
-                    <Plus size={14} /> Add Material
+                    <Plus size={14} /> {t.addMaterial}
                   </button>
                 </div>
                 <div className="space-y-2">
@@ -760,9 +903,9 @@ export default function App() {
               
               <div className="mb-4">
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Remarks List</label>
+                  <label className="block text-lg font-semibold text-gray-800">{t.remarksList}</label>
                   <button onClick={addRemark} className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
-                    <Plus size={14} /> Add Remark
+                    <Plus size={14} /> {t.addRemark}
                   </button>
                 </div>
                 <div className="space-y-2">
@@ -784,9 +927,9 @@ export default function App() {
 
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Sign-off Details</label>
+                  <label className="block text-sm font-medium text-gray-700">{t.signOffDetails}</label>
                   <button onClick={addSignOff} className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
-                    <Plus size={14} /> Add Line
+                    <Plus size={14} /> {t.addLine}
                   </button>
                 </div>
                 <div className="space-y-2">
@@ -814,7 +957,7 @@ export default function App() {
         <div className="lg:col-span-8 xl:col-span-7 space-y-6">
           <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-200">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Preview</h2>
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800">{t.preview}</h2>
               <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                 <select 
                   value={orientation}
@@ -828,7 +971,7 @@ export default function App() {
                   <ImageIcon size={18} /> <span className="text-sm font-medium">Save as Image</span>
                 </button>
                 <button onClick={generatePDF} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 transition-colors shadow-sm">
-                  <Printer size={18} /> <span className="text-sm font-medium">Save as PDF</span>
+                  <Printer size={18} /> <span className="text-sm font-medium">{t.downloadPdf}</span>
                 </button>
               </div>
             </div>
@@ -868,60 +1011,65 @@ export default function App() {
               </div>
 
               {/* Table */}
-              <table className="w-full border-collapse border border-[#000000] mb-6 text-[14px] text-[#000000]">
-                <thead className="font-bold">
-                  <tr className="border-b border-[#000000]">
-                    <th className="border-r border-[#000000] px-2 py-1.5 text-center w-10">No</th>
-                    <th className="border-r border-[#000000] px-2 py-1.5 text-center">Particulars</th>
-                    <th className="border-r border-[#000000] px-2 py-1.5 text-center w-24">Dimension</th>
-                    <th className="border-r border-[#000000] px-2 py-1.5 text-center w-12">Qty</th>
-                    <th className="border-r border-[#000000] px-2 py-1.5 text-center w-20">Square Feet</th>
-                    <th className="border-r border-[#000000] px-2 py-1.5 text-center w-24">Rate</th>
-                    <th className="border-r border-[#000000] px-2 py-1.5 text-center w-28">Amount(Ks)</th>
-                    <th className="px-2 py-1.5 text-center w-24">Remark</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map((item, index) => (
-                    <tr key={item.id} className="border-b border-[#000000] break-inside-avoid">
-                      <td className="border-r border-[#000000] px-2 py-1.5 text-center">{index + 1}.</td>
-                      <td className="border-r border-[#000000] px-2 py-1.5">{item.particulars}</td>
-                      <td className="border-r border-[#000000] px-2 py-1.5 text-center">{item.dimension}</td>
-                      <td className="border-r border-[#000000] px-2 py-1.5 text-center">{item.qty}</td>
-                      <td className="border-r border-[#000000] px-2 py-1.5 text-right">{item.squareFeet || '-'}</td>
-                      <td className="border-r border-[#000000] px-2 py-1.5 text-right">{item.rate ? Number(item.rate).toLocaleString() : '-'}</td>
-                      <td className="border-r border-[#000000] px-2 py-1.5 text-right">{item.amount ? Number(item.amount).toLocaleString() : '-'}</td>
-                      <td className="px-2 py-1.5 text-center">{item.remark}</td>
-                    </tr>
-                  ))}
-                  {/* Total Rows */}
-                  {Number(data.discount) > 0 ? (
-                    <>
-                      <tr className="border-b border-[#000000] font-bold break-inside-avoid">
-                        <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">Sub Total</td>
-                        <td className="border-r border-[#000000] px-2 py-1.5 text-right">{totalAmount.toLocaleString()}</td>
-                        <td className="px-2 py-1.5"></td>
+              {(() => {
+                const hasRemarks = data.items.some(item => item.remark && item.remark.trim() !== '');
+                return (
+                  <table className="w-full border-collapse border border-[#000000] mb-6 text-[14px] text-[#000000]">
+                    <thead className="font-bold">
+                      <tr className="border-b border-[#000000]">
+                        <th className="border-r border-[#000000] px-2 py-1.5 text-center w-10">{t.no}</th>
+                        <th className="border-r border-[#000000] px-2 py-1.5 text-center">{t.particulars}</th>
+                        <th className="border-r border-[#000000] px-2 py-1.5 text-center w-24">{t.dimension}</th>
+                        <th className="border-r border-[#000000] px-2 py-1.5 text-center w-12">{t.qty}</th>
+                        <th className="border-r border-[#000000] px-2 py-1.5 text-center w-20">{t.sqFeet}</th>
+                        <th className="border-r border-[#000000] px-2 py-1.5 text-center w-24">{t.rate}</th>
+                        <th className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-center w-28`}>{t.amount}</th>
+                        {hasRemarks && <th className="px-2 py-1.5 text-center w-24">{t.remark}</th>}
                       </tr>
-                      <tr className="border-b border-[#000000] font-bold break-inside-avoid" style={{ color: '#dc2626' }}>
-                        <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">Discount</td>
-                        <td className="border-r border-[#000000] px-2 py-1.5 text-right">- {Number(data.discount).toLocaleString()}</td>
-                        <td className="px-2 py-1.5"></td>
-                      </tr>
-                      <tr className="font-bold break-inside-avoid">
-                        <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">Total</td>
-                        <td className="border-r border-[#000000] px-2 py-1.5 text-right">{finalTotal.toLocaleString()}</td>
-                        <td className="px-2 py-1.5"></td>
-                      </tr>
-                    </>
-                  ) : (
-                    <tr className="font-bold break-inside-avoid">
-                      <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">Total</td>
-                      <td className="border-r border-[#000000] px-2 py-1.5 text-right">{totalAmount.toLocaleString()}</td>
-                      <td className="px-2 py-1.5"></td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {data.items.map((item, index) => (
+                        <tr key={item.id} className="border-b border-[#000000] break-inside-avoid">
+                          <td className="border-r border-[#000000] px-2 py-1.5 text-center">{index + 1}.</td>
+                          <td className="border-r border-[#000000] px-2 py-1.5">{item.particulars}</td>
+                          <td className="border-r border-[#000000] px-2 py-1.5 text-center">{item.dimension}</td>
+                          <td className="border-r border-[#000000] px-2 py-1.5 text-center">{item.qty}</td>
+                          <td className="border-r border-[#000000] px-2 py-1.5 text-right">{item.squareFeet || '-'}</td>
+                          <td className="border-r border-[#000000] px-2 py-1.5 text-right">{item.rate ? Number(item.rate).toLocaleString() : '-'}</td>
+                          <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{item.amount ? Number(item.amount).toLocaleString() : '-'}</td>
+                          {hasRemarks && <td className="px-2 py-1.5 text-center">{item.remark}</td>}
+                        </tr>
+                      ))}
+                      {/* Total Rows */}
+                      {Number(data.discount) > 0 ? (
+                        <>
+                          <tr className="border-b border-[#000000] font-bold break-inside-avoid">
+                            <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">Sub Total</td>
+                            <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{totalAmount.toLocaleString()}</td>
+                            {hasRemarks && <td className="px-2 py-1.5"></td>}
+                          </tr>
+                          <tr className="border-b border-[#000000] font-bold break-inside-avoid" style={{ color: '#dc2626' }}>
+                            <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.discount}</td>
+                            <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>- {Number(data.discount).toLocaleString()}</td>
+                            {hasRemarks && <td className="px-2 py-1.5"></td>}
+                          </tr>
+                          <tr className="font-bold break-inside-avoid">
+                            <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
+                            <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{finalTotal.toLocaleString()}</td>
+                            {hasRemarks && <td className="px-2 py-1.5"></td>}
+                          </tr>
+                        </>
+                      ) : (
+                        <tr className="font-bold break-inside-avoid">
+                          <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
+                          <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{totalAmount.toLocaleString()}</td>
+                          {hasRemarks && <td className="px-2 py-1.5"></td>}
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                );
+              })()}
 
               {/* Footer Content */}
               <div className="text-[14px] break-inside-avoid">
@@ -961,14 +1109,14 @@ export default function App() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
             <div className="flex justify-between items-center p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-800">Saved Quotations</h2>
+              <h2 className="text-xl font-bold text-gray-800">{t.savedQuotations}</h2>
               <button onClick={() => setShowSavedModal(false)} className="text-gray-500 hover:bg-gray-100 p-2 rounded-md">
                 <X size={20} />
               </button>
             </div>
             <div className="p-6 overflow-y-auto flex-1">
               {savedQuotations.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">No saved quotations found.</p>
+                <p className="text-gray-500 text-center py-8">{t.noSavedQuotations}</p>
               ) : (
                 <div className="space-y-3">
                   {savedQuotations.map(q => {
@@ -976,15 +1124,15 @@ export default function App() {
                     return (
                       <div key={q.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
                         <div>
-                          <div className="font-semibold text-gray-800">{q.quotationNumber || 'Untitled'}</div>
-                          <div className="text-sm text-gray-500">Date: {q.date} • Total: {(q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) - (Number(q.discount) || 0)).toLocaleString()} Ks</div>
+                          <div className="font-semibold text-gray-800">{q.quotationNumber || t.untitled}</div>
+                          <div className="text-sm text-gray-500">{t.date}: {q.date} • {t.total}: {(q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) - (Number(q.discount) || 0)).toLocaleString()} Ks</div>
                         </div>
                         <div className="flex gap-2 w-full sm:w-auto">
                           <button 
                             onClick={() => loadQuotation(q)}
                             className="flex-1 sm:flex-none px-3 py-1.5 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 text-sm font-medium text-center"
                           >
-                            Load
+                            {t.load}
                           </button>
                           <button 
                             onClick={() => deleteQuotation(q.id)}
