@@ -67,7 +67,7 @@ service cloud.firestore {
     }
 
     match /quotations/{quotationId} {
-      allow read: if isAuthenticated() && isDocOwner();
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow create: if isAuthenticated() && isValidQuotation(request.resource.data) && uidUnchanged();
       allow update: if isAuthenticated() && isDocOwner() && isValidQuotation(request.resource.data) && uidNotModified();
       allow delete: if isAuthenticated() && isDocOwner();

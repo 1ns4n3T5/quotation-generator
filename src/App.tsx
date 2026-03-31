@@ -4,7 +4,7 @@ import { jsPDF } from 'jspdf';
 import html2pdf from 'html2pdf.js';
 import { Plus, Trash2, Download, Printer, Image as ImageIcon, FileText, Save, FolderOpen, X, FilePlus, LogIn, LogOut, LayoutDashboard, CloudUpload, CloudDownload, Globe, Menu } from 'lucide-react';
 import { db, auth, loginWithGoogle, logout } from './firebase';
-import { collection, doc, setDoc, onSnapshot, query, where, orderBy, getDocs, getDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, query, where, orderBy, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Dashboard } from './Dashboard';
 import { Toaster, toast } from 'sonner';
@@ -72,16 +72,26 @@ export interface QuotationData {
   discount?: string;
 }
 
+const myNotifications = Object.fromEntries(
+  Object.entries(translations.my).filter(([key]) => key.startsWith('notif'))
+);
+
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const t = translations[language];
+  const t = {
+    ...translations[language],
+    ...myNotifications
+  } as typeof translations['en'];
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [savedQuotations, setSavedQuotations] = useState<QuotationData[]>(() => {
     const saved = localStorage.getItem('localQuotations');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
+      try { 
+        const parsed = JSON.parse(saved);
+        return parsed.map((q: any) => ({ ...q, headerImage: null }));
+      } catch (e) { return []; }
     }
     return [];
   });
@@ -112,16 +122,18 @@ export default function App() {
     };
   });
 
-  const saveQuotation = async () => {
+  const saveQuotation = async (): Promise<boolean> => {
     if (!data.quotationNumber) {
-      toast.error('Please enter a quotation number before saving.');
-      return;
+      toast.error(t.notifEnterQuotationNo);
+      return false;
     }
 
     setIsSaving(true);
     try {
+      const { headerImage, ...restData } = data;
       const quotationToSave = {
-        ...data,
+        ...restData,
+        headerImage: null,
         createdAt: (data as any).createdAt || Date.now()
       };
       
@@ -140,20 +152,26 @@ export default function App() {
       localStorage.setItem('localQuotations', JSON.stringify(newQuotations));
       
       if (user) {
-        try {
-          const { headerImage, ...rest } = quotationToSave;
-          await setDoc(doc(db, 'quotations', quotationToSave.id), { ...rest, userId: user.uid });
-          toast.success('Quotation saved locally and backed up to cloud!');
-        } catch (error) {
-          toast.success('Quotation saved locally! (Cloud backup failed)');
-          handleFirestoreError(error, OperationType.WRITE, 'quotations');
-        }
+        const { headerImage, ...rest } = quotationToSave;
+        setDoc(doc(db, 'quotations', quotationToSave.id), { ...rest, userId: user.uid })
+          .then(() => {
+            toast.success(t.notifSavedLocalCloud);
+          })
+          .catch((error) => {
+            toast.success(t.notifSavedLocalCloudFail);
+            try {
+              handleFirestoreError(error, OperationType.WRITE, 'quotations');
+            } catch (e) {
+              // Ignore the thrown error from handleFirestoreError
+            }
+          });
       } else {
-        toast.success('Quotation saved locally!');
+        toast.success(t.notifSavedLocal);
       }
+      return true;
     } catch (error) {
       console.error(error);
-      throw error;
+      return false;
     } finally {
       setTimeout(() => setIsSaving(false), 500);
     }
@@ -162,19 +180,19 @@ export default function App() {
   const loadQuotation = (quotation: QuotationData) => {
     setData({ ...quotation, headerImage: data.headerImage });
     setShowSavedModal(false);
-    toast.success('Quotation restored successfully!');
+    toast.success(t.notifRestoredSuccess);
   };
 
   const deleteQuotation = async (id: string) => {
-    toast('Delete Quotation', {
-      description: 'Are you sure you want to delete this quotation locally? It will remain safe in your Google Cloud backup.',
+    toast(t.notifDeleteTitle, {
+      description: t.notifDeleteDesc,
       action: {
-        label: 'Delete',
+        label: t.delete,
         onClick: async () => {
           const newQuotations = savedQuotations.filter(q => q.id !== id);
           setSavedQuotations(newQuotations);
           localStorage.setItem('localQuotations', JSON.stringify(newQuotations));
-          toast.success('Quotation deleted locally (Still in Cloud)');
+          toast.success(t.notifDeletedLocal);
         }
       }
     });
@@ -200,20 +218,41 @@ export default function App() {
     })();
 
     toast.promise(backupPromise, {
-      loading: 'Backing up to Google Cloud...',
-      success: 'Successfully backed up to Google Cloud!',
+      loading: t.notifBackupLoading,
+      success: t.notifBackupSuccess,
       error: (err) => {
-        handleFirestoreError(err, OperationType.WRITE, 'quotations');
-        return 'Backup failed. Please try again.';
+        try {
+          handleFirestoreError(err, OperationType.WRITE, 'quotations');
+        } catch (e) {
+          // Ignore
+        }
+        return t.notifBackupError;
       },
     });
 
     try {
       await backupPromise;
+    } catch (e) {
+      // Error is handled by toast.promise
     } finally {
       setIsSaving(false);
     }
   };
+
+  const backupToCloudRef = useRef(backupToCloud);
+  useEffect(() => {
+    backupToCloudRef.current = backupToCloud;
+  }, [backupToCloud]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      if (auth.currentUser) {
+        backupToCloudRef.current();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
 
   const restoreFromCloud = async () => {
     if (!user) return;
@@ -227,6 +266,12 @@ export default function App() {
         cloudQuotations.push(doc.data() as QuotationData);
       });
       
+      const settingsDoc = await getDoc(doc(db, 'settings', user.uid));
+      
+      if (cloudQuotations.length === 0 && !settingsDoc.exists()) {
+        throw new Error('NO_DATA');
+      }
+      
       const mergedMap = new Map<string, QuotationData>();
       savedQuotations.forEach(q => mergedMap.set(q.id, q));
       cloudQuotations.forEach(q => mergedMap.set(q.id, q));
@@ -237,7 +282,6 @@ export default function App() {
       setSavedQuotations(mergedList);
       localStorage.setItem('localQuotations', JSON.stringify(mergedList));
       
-      const settingsDoc = await getDoc(doc(db, 'settings', user.uid));
       if (settingsDoc.exists()) {
         const settings = settingsDoc.data();
         if (settings.headerImage) {
@@ -248,26 +292,35 @@ export default function App() {
     })();
 
     toast.promise(restorePromise, {
-      loading: 'Restoring from Google Cloud...',
-      success: 'Successfully restored from Google Cloud!',
-      error: (err) => {
-        handleFirestoreError(err, OperationType.GET, 'quotations');
-        return 'Restore failed. Please try again.';
+      loading: t.notifRestoreLoading,
+      success: t.notifRestoreSuccess,
+      error: (err: any) => {
+        if (err?.message === 'NO_DATA') {
+          return t.notifNoBackupData;
+        }
+        try {
+          handleFirestoreError(err, OperationType.GET, 'quotations');
+        } catch (e) {
+          // Ignore
+        }
+        return t.notifRestoreError;
       },
     });
 
     try {
       await restorePromise;
+    } catch (e) {
+      // Error is handled by toast.promise
     } finally {
       setIsSaving(false);
     }
   };
 
   const createNewQuotation = () => {
-    toast('New Quotation', {
-      description: 'Create new quotation? Unsaved changes will be lost.',
+    toast(t.notifNewTitle, {
+      description: t.notifNewDesc,
       action: {
-        label: 'Create',
+        label: t.notifNewAction,
         onClick: () => {
           setData({
             id: Date.now().toString(),
@@ -299,15 +352,18 @@ export default function App() {
       localStorage.setItem('localLogo', base64);
       
       if (user) {
-        try {
-          await setDoc(doc(db, 'settings', user.uid), {
-            userId: user.uid,
-            headerImage: base64
+        setDoc(doc(db, 'settings', user.uid), {
+          userId: user.uid,
+          headerImage: base64
+        })
+          .then(() => {
+            toast.success(t.notifLogoUploaded);
+          })
+          .catch((error) => {
+            try {
+              handleFirestoreError(error, OperationType.WRITE, 'settings');
+            } catch (e) {}
           });
-          toast.success('Logo uploaded and backed up to cloud');
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, 'settings');
-        }
       }
     };
     reader.readAsDataURL(file);
@@ -316,7 +372,7 @@ export default function App() {
   const removeLogo = async () => {
     setData(prev => ({...prev, headerImage: null}));
     localStorage.removeItem('localLogo');
-    toast.success('Logo removed locally (Still in Cloud)');
+    toast.success(t.notifLogoRemoved);
   };
 
   const previewRef = useRef<HTMLDivElement>(null);
@@ -420,6 +476,9 @@ export default function App() {
 
   const generateImage = async () => {
     if (!previewRef.current) return;
+    const saved = await saveQuotation();
+    if (!saved) return;
+
     try {
       const element = previewRef.current;
       const canvas = await html2canvas(element, { 
@@ -436,14 +495,18 @@ export default function App() {
       link.download = `quotation-${data.date}.png`;
       link.href = dataUrl;
       link.click();
+      toast.success(t.notifImageSaved);
     } catch (err) {
       console.error('Failed to generate image', err);
-      toast.error('Failed to generate image. Please try again.');
+      toast.error(t.notifImageGenFail);
     }
   };
 
   const generatePDF = async () => {
     if (!previewRef.current) return;
+    const saved = await saveQuotation();
+    if (!saved) return;
+
     try {
       const element = previewRef.current;
       const canvas = await html2canvas(element, { 
@@ -489,7 +552,7 @@ export default function App() {
       pdf.save(`quotation-${data.date}.pdf`);
     } catch (err) {
       console.error('Failed to generate PDF', err);
-      toast.error('Failed to generate PDF. Please try again.');
+      toast.error(t.notifPdfGenFail);
     }
   };
 
@@ -534,14 +597,6 @@ export default function App() {
                     }`}
                   >
                     {currentView === 'editor' ? <><LayoutDashboard size={16} /> {t.dashboard}</> : <><FileText size={16} /> {t.editor}</>}
-                  </button>
-                  <button 
-                    onClick={backupToCloud}
-                    disabled={isSaving}
-                    className="flex items-center gap-2 text-sm bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl transition-all font-semibold disabled:opacity-50"
-                    title={t.backup}
-                  >
-                    <CloudUpload size={16} /> <span className="hidden sm:inline">{t.backup}</span>
                   </button>
                   <button 
                     onClick={restoreFromCloud}
@@ -646,14 +701,7 @@ export default function App() {
                   >
                     {currentView === 'editor' ? <><LayoutDashboard size={16} /> {t.dashboard}</> : <><FileText size={16} /> {t.editor}</>}
                   </button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button 
-                      onClick={() => { backupToCloud(); setIsMobileMenuOpen(false); }}
-                      disabled={isSaving}
-                      className="flex items-center justify-center gap-2 text-sm bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-3 rounded-xl transition-all font-semibold disabled:opacity-50"
-                    >
-                      <CloudUpload size={16} /> {t.backup}
-                    </button>
+                  <div className="grid grid-cols-1 gap-2">
                     <button 
                       onClick={() => { restoreFromCloud(); setIsMobileMenuOpen(false); }}
                       disabled={isSaving}
@@ -733,22 +781,14 @@ export default function App() {
                 className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-md border border-gray-200 transition-colors whitespace-nowrap" 
                 title={t.new}
               >
-                <FilePlus size={18} /> <span className="text-sm font-medium">{t.new}</span>
+                <FilePlus size={18} /> <span className="text-base font-medium">{t.new}</span>
               </button>
               <button 
                 onClick={() => setShowSavedModal(true)} 
                 className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-md border border-gray-200 transition-colors whitespace-nowrap" 
                 title={t.open}
               >
-                <FolderOpen size={18} /> <span className="text-sm font-medium">{t.open}</span>
-              </button>
-              <button 
-                onClick={saveQuotation} 
-                disabled={isSaving}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-gray-200 transition-colors whitespace-nowrap ${isSaving ? 'text-gray-400 bg-gray-100' : 'text-blue-600 hover:bg-blue-50'}`} 
-                title={t.save}
-              >
-                <Save size={18} /> <span className="text-sm font-medium">{isSaving ? t.saving : t.save}</span>
+                <FolderOpen size={18} /> <span className="text-base font-medium">{t.open}</span>
               </button>
             </div>
           </div>
@@ -756,7 +796,7 @@ export default function App() {
           <div className="space-y-4">
             <div className="mb-2">
               <div className="flex justify-between items-center mb-1">
-                <label className="block text-sm font-medium text-gray-700">{t.headerLogoImage}</label>
+                <label className="block text-base font-semibold text-gray-700">{t.headerLogoImage}</label>
                 {data.headerImage && (
                   <button 
                     onClick={removeLogo}
@@ -773,33 +813,33 @@ export default function App() {
                   const file = e.target.files?.[0];
                   if (file) {
                     if (file.size > 1048576) {
-                      toast.error('Image is too large. Please upload an image smaller than 1MB.');
+                      toast.error(t.notifImageLarge);
                       return;
                     }
                     handleLogoUpload(file);
                   }
                 }}
-                className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                className="w-full text-base text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-base file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t.quotationNo}</label>
+                <label className="block text-base font-semibold text-gray-700 mb-1">{t.quotationNo}</label>
                 <input 
                   type="text" 
                   value={data.quotationNumber} 
                   onChange={e => setData({...data, quotationNumber: e.target.value})}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full p-2 text-base border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="e.g. Q-001"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t.date}</label>
+                <label className="block text-base font-semibold text-gray-700 mb-1">{t.date}</label>
                 <input 
                   type="text" 
                   value={data.date} 
                   onChange={e => setData({...data, date: e.target.value})}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full p-2 text-base border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
             </div>
@@ -807,7 +847,7 @@ export default function App() {
             <div className="pt-4 border-t border-gray-200">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-lg font-semibold text-gray-800">{t.items}</h3>
-                <button onClick={addItem} className="text-sm bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1">
+                <button onClick={addItem} className="text-base bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1">
                   <Plus size={16} /> {t.addItem}
                 </button>
               </div>
@@ -823,35 +863,35 @@ export default function App() {
                     </button>
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
                       <div className="sm:col-span-12">
-                        <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.particulars}</label>
-                        <input type="text" value={item.particulars} onChange={e => handleItemChange(item.id, 'particulars', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.itemName} />
+                        <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.particulars}</label>
+                        <input type="text" value={item.particulars} onChange={e => handleItemChange(item.id, 'particulars', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.itemName} />
                       </div>
                       <div className="grid grid-cols-2 sm:contents gap-3">
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.dimension}</label>
-                          <input type="text" value={item.dimension} onChange={e => handleItemChange(item.id, 'dimension', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.size} />
+                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.dimension}</label>
+                          <input type="text" value={item.dimension} onChange={e => handleItemChange(item.id, 'dimension', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.size} />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.qty}</label>
-                          <input type="number" value={item.qty} onChange={e => handleItemChange(item.id, 'qty', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
+                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.qty}</label>
+                          <input type="number" value={item.qty} onChange={e => handleItemChange(item.id, 'qty', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.sqFeet}</label>
-                          <input type="number" value={item.squareFeet} onChange={e => handleItemChange(item.id, 'squareFeet', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
+                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.sqFeet}</label>
+                          <input type="number" value={item.squareFeet} onChange={e => handleItemChange(item.id, 'squareFeet', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 sm:contents gap-3">
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.rate}</label>
-                          <input type="number" value={item.rate} onChange={e => handleItemChange(item.id, 'rate', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white font-semibold text-blue-600" />
+                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.rate}</label>
+                          <input type="number" value={item.rate} onChange={e => handleItemChange(item.id, 'rate', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white font-semibold text-blue-600" />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.amount}</label>
-                          <input type="number" value={item.amount} onChange={e => handleItemChange(item.id, 'amount', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-100 font-bold" readOnly />
+                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.amount}</label>
+                          <input type="number" value={item.amount} onChange={e => handleItemChange(item.id, 'amount', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-100 font-bold" readOnly />
                         </div>
                         <div className="sm:col-span-4">
-                          <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-1">{t.remark}</label>
-                          <input type="text" value={item.remark} onChange={e => handleItemChange(item.id, 'remark', e.target.value)} className="w-full p-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="..." />
+                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.remark}</label>
+                          <input type="text" value={item.remark} onChange={e => handleItemChange(item.id, 'remark', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="..." />
                         </div>
                       </div>
                     </div>
@@ -861,14 +901,14 @@ export default function App() {
             </div>
 
             <div className="pt-4 border-t border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-800 mb-3">{t.discount}</h3>
+              <h3 className="text-xl font-bold text-gray-800 mb-3">{t.discount}</h3>
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t.discountAmount}</label>
+                <label className="block text-base font-semibold text-gray-700 mb-1">{t.discountAmount}</label>
                 <input
                   type="number"
                   value={data.discount || ''}
                   onChange={(e) => setData({ ...data, discount: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full p-2 text-base border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="Enter discount amount (e.g. 154750)"
                 />
               </div>
@@ -879,8 +919,8 @@ export default function App() {
               
               <div className="mb-4">
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-lg font-semibold text-gray-800">{t.materialsUsed}</label>
-                  <button onClick={addMaterial} className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
+                  <label className="block text-xl font-bold text-gray-800">{t.materialsUsed}</label>
+                  <button onClick={addMaterial} className="text-sm bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
                     <Plus size={14} /> {t.addMaterial}
                   </button>
                 </div>
@@ -891,7 +931,7 @@ export default function App() {
                         type="text" 
                         value={material} 
                         onChange={e => handleMaterialChange(index, e.target.value)}
-                        className="flex-1 p-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="flex-1 p-2 text-base border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                       />
                       <button onClick={() => removeMaterial(index)} className="text-red-500 hover:bg-red-50 p-2 rounded-md">
                         <Trash2 size={16} />
@@ -903,8 +943,8 @@ export default function App() {
               
               <div className="mb-4">
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-lg font-semibold text-gray-800">{t.remarksList}</label>
-                  <button onClick={addRemark} className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
+                  <label className="block text-xl font-bold text-gray-800">{t.remarksList}</label>
+                  <button onClick={addRemark} className="text-sm bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
                     <Plus size={14} /> {t.addRemark}
                   </button>
                 </div>
@@ -915,7 +955,7 @@ export default function App() {
                         type="text" 
                         value={remark} 
                         onChange={e => handleRemarkChange(index, e.target.value)}
-                        className="flex-1 p-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="flex-1 p-2 text-base border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                       />
                       <button onClick={() => removeRemark(index)} className="text-red-500 hover:bg-red-50 p-2 rounded-md">
                         <Trash2 size={16} />
@@ -927,8 +967,8 @@ export default function App() {
 
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-gray-700">{t.signOffDetails}</label>
-                  <button onClick={addSignOff} className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
+                  <label className="block text-base font-semibold text-gray-700">{t.signOffDetails}</label>
+                  <button onClick={addSignOff} className="text-sm bg-blue-50 text-blue-600 px-2.5 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium transition-colors">
                     <Plus size={14} /> {t.addLine}
                   </button>
                 </div>
@@ -939,7 +979,7 @@ export default function App() {
                         type="text" 
                         value={line} 
                         onChange={e => handleSignOffChange(index, e.target.value)}
-                        className="flex-1 p-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="flex-1 p-2 text-base border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                       />
                       <button onClick={() => removeSignOff(index)} className="text-red-500 hover:bg-red-50 p-2 rounded-md">
                         <Trash2 size={16} />
@@ -962,16 +1002,16 @@ export default function App() {
                 <select 
                   value={orientation}
                   onChange={(e) => setOrientation(e.target.value as 'portrait' | 'landscape')}
-                  className="flex-1 sm:flex-none p-2 text-sm border border-gray-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 sm:flex-none p-2 text-base border border-gray-300 rounded-md bg-white outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="portrait">Portrait (A4)</option>
                   <option value="landscape">Landscape (A4)</option>
                 </select>
                 <button onClick={generateImage} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 transition-colors shadow-sm">
-                  <ImageIcon size={18} /> <span className="text-sm font-medium">Save as Image</span>
+                  <ImageIcon size={18} /> <span className="text-base font-medium">Save as Image</span>
                 </button>
                 <button onClick={generatePDF} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700 transition-colors shadow-sm">
-                  <Printer size={18} /> <span className="text-sm font-medium">{t.downloadPdf}</span>
+                  <Printer size={18} /> <span className="text-base font-medium">{t.downloadPdf}</span>
                 </button>
               </div>
             </div>
