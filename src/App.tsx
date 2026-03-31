@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import html2canvas from 'html2canvas';
+import { toPng, toCanvas } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import html2pdf from 'html2pdf.js';
 import { Plus, Trash2, Download, Printer, Image as ImageIcon, FileText, Save, FolderOpen, X, FilePlus, LogIn, LogOut, LayoutDashboard, CloudUpload, CloudDownload, Globe, Menu } from 'lucide-react';
 import { db, auth, loginWithGoogle, logout } from './firebase';
 import { collection, doc, setDoc, onSnapshot, query, where, orderBy, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
@@ -481,16 +480,15 @@ export default function App() {
 
     try {
       const element = previewRef.current;
-      const canvas = await html2canvas(element, { 
-        scale: 2, 
-        useCORS: true,
-        scrollX: 0,
-        scrollY: 0,
+      const dataUrl = await toPng(element, { 
+        pixelRatio: 2, 
         backgroundColor: '#ffffff',
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight
+        skipFonts: true,
+        style: {
+          transform: 'scale(1)',
+          transformOrigin: 'top left'
+        }
       });
-      const dataUrl = canvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.download = `quotation-${data.date}.png`;
       link.href = dataUrl;
@@ -509,14 +507,14 @@ export default function App() {
 
     try {
       const element = previewRef.current;
-      const canvas = await html2canvas(element, { 
-        scale: 2, 
-        useCORS: true,
-        scrollX: 0,
-        scrollY: 0,
+      const canvas = await toCanvas(element, { 
+        pixelRatio: 2, 
         backgroundColor: '#ffffff',
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight
+        skipFonts: true,
+        style: {
+          transform: 'scale(1)',
+          transformOrigin: 'top left'
+        }
       });
       
       const imgData = canvas.toDataURL('image/jpeg', 0.98);
