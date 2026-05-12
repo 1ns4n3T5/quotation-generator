@@ -1185,7 +1185,7 @@ export default function App() {
                               </div>
                               <button 
                                 onClick={() => removeCustomColumn(col.id)}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 p-1 hover:bg-red-50 rounded"
                                 title="Remove Column"
                               >
                                 <X size={14} />
