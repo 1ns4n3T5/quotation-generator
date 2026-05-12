@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { toPng, toCanvas } from 'html-to-image';
 import { jsPDF } from 'jspdf';
-import { Plus, Trash2, Download, Printer, Image as ImageIcon, FileText, Save, FolderOpen, X, FilePlus, LogIn, LogOut, LayoutDashboard, CloudUpload, CloudDownload, Globe, Menu } from 'lucide-react';
+import { Plus, Trash2, Download, Printer, Image as ImageIcon, FileText, Save, FolderOpen, X, FilePlus, LogIn, LogOut, LayoutDashboard, CloudUpload, CloudDownload, Globe, Menu, ZoomIn, ZoomOut } from 'lucide-react';
 import { db, auth, loginWithGoogle, logout } from './firebase';
 import { collection, doc, setDoc, onSnapshot, query, where, orderBy, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -59,8 +59,20 @@ export interface QuotationItem {
   remark: string;
 }
 
+export interface CustomColumn {
+  id: string;
+  name: string;
+  type: 'text' | 'number';
+}
+
+export interface CustomRow {
+  id: string;
+  [key: string]: any;
+}
+
 export interface QuotationData {
   id: string;
+  type?: 'standard' | 'custom';
   quotationNumber: string;
   date: string;
   items: QuotationItem[];
@@ -69,6 +81,9 @@ export interface QuotationData {
   signOff: string[];
   headerImage: string | null;
   discount?: string;
+  customColumns?: CustomColumn[];
+  customRows?: CustomRow[];
+  showTotal?: boolean;
 }
 
 const myNotifications = Object.fromEntries(
@@ -96,8 +111,67 @@ export default function App() {
   });
   const [showSavedModal, setShowSavedModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showColForm, setShowColForm] = useState(false);
+  const [newColName, setNewColName] = useState('');
+  const [newColType, setNewColType] = useState<'text' | 'number'>('text');
   const [currentView, setCurrentView] = useState<'editor' | 'dashboard'>('editor');
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(zoom);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let initialDist = 0;
+    let initialZoom = 1;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        initialDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialZoom = zoomRef.current;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && initialDist > 0) {
+        e.preventDefault();
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const scale = dist / initialDist;
+        let newZoom = initialZoom * scale;
+        newZoom = Math.min(2, Math.max(0.3, newZoom));
+        setZoom(newZoom);
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        initialDist = 0;
+      }
+    };
+
+    container.addEventListener('touchstart', onTouchStart, { passive: false });
+    container.addEventListener('touchmove', onTouchMove, { passive: false });
+    container.addEventListener('touchend', onTouchEnd);
+
+    return () => {
+      container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchmove', onTouchMove);
+      container.removeEventListener('touchend', onTouchEnd);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -111,13 +185,20 @@ export default function App() {
     const savedLogo = localStorage.getItem('localLogo');
     return {
       id: Date.now().toString(),
+      type: 'standard',
       quotationNumber: '',
       date: new Date().toLocaleDateString('en-GB').replace(/\//g, '.'),
       headerImage: savedLogo || null,
       items: [],
       materials: [],
       remarks: [],
-      signOff: ['Best Regards', 'Zaw Lin Aung', '09-420225277']
+      signOff: ['Best Regards', 'Zaw Lin Aung', '09-420225277'],
+      customColumns: [
+        { id: 'col1', name: 'Particulars', type: 'text' },
+        { id: 'col2', name: 'Amount', type: 'number' }
+      ],
+      customRows: [],
+      showTotal: true
     };
   });
 
@@ -323,6 +404,7 @@ export default function App() {
         onClick: () => {
           setData({
             id: Date.now().toString(),
+            type: data.type,
             quotationNumber: '',
             date: new Date().toLocaleDateString('en-GB').replace(/\//g, '.'),
             headerImage: data.headerImage,
@@ -332,7 +414,13 @@ export default function App() {
             materials: [''],
             remarks: [''],
             signOff: ['Best Regards', 'Zaw Lin Aung', '09-420225277'],
-            discount: ''
+            discount: '',
+            customColumns: [
+              { id: 'col1', name: 'Particulars', type: 'text' },
+              { id: 'col2', name: 'Amount', type: 'number' }
+            ],
+            customRows: [],
+            showTotal: true
           });
         }
       },
@@ -394,6 +482,74 @@ export default function App() {
         return item;
       })
     }));
+  };
+
+  const handleCustomRowChange = (rowId: string, colId: string, value: any) => {
+    setData(prev => ({
+      ...prev,
+      customRows: (prev.customRows || []).map(row => 
+        row.id === rowId ? { ...row, [colId]: value } : row
+      )
+    }));
+  };
+
+  const addCustomRow = () => {
+    setData(prev => ({
+      ...prev,
+      customRows: [
+        ...(prev.customRows || []),
+        { id: Date.now().toString() }
+      ]
+    }));
+  };
+
+  const removeCustomRow = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      customRows: (prev.customRows || []).filter(row => row.id !== id)
+    }));
+  };
+
+  const addCustomColumn = (name: string, type: 'text' | 'number') => {
+    setData(prev => ({
+      ...prev,
+      customColumns: [
+        ...(prev.customColumns || []),
+        { id: `col_${Date.now()}`, name, type }
+      ]
+    }));
+  };
+
+  const updateCustomColumn = (id: string, updates: Partial<CustomColumn>) => {
+    setData(prev => ({
+      ...prev,
+      customColumns: (prev.customColumns || []).map(col => col.id === id ? { ...col, ...updates } : col)
+    }));
+  };
+
+  const removeCustomColumn = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      customColumns: (prev.customColumns || []).filter(col => col.id !== id),
+      // Clean up deleted column data
+      customRows: (prev.customRows || []).map(row => {
+        const newRow = { ...row };
+        delete newRow[id];
+        return newRow;
+      })
+    }));
+  };
+
+  const getCustomTotalAmount = () => {
+    const cols = data.customColumns || [];
+    const numberColIds = cols.filter(c => c.type === 'number').map(c => c.id);
+    let total = 0;
+    (data.customRows || []).forEach(row => {
+      numberColIds.forEach(colId => {
+        total += (Number(row[colId]) || 0);
+      });
+    });
+    return total;
   };
 
   const addItem = () => {
@@ -792,6 +948,22 @@ export default function App() {
           </div>
 
           <div className="space-y-4">
+            {/* View Type Toggle */}
+            <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
+              <button
+                onClick={() => setData({ ...data, type: 'standard' })}
+                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${(!data.type || data.type === 'standard') ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Standard Quotation
+              </button>
+              <button
+                onClick={() => setData({ ...data, type: 'custom' })}
+                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${data.type === 'custom' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Custom Quotation
+              </button>
+            </div>
+
             <div className="mb-2">
               <div className="flex justify-between items-center mb-1">
                 <label className="block text-base font-semibold text-gray-700">{t.headerLogoImage}</label>
@@ -842,61 +1014,234 @@ export default function App() {
               </div>
             </div>
 
-            <div className="pt-4 border-t border-gray-200">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-lg font-semibold text-gray-800">{t.items}</h3>
-                <button onClick={addItem} className="text-base bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1">
-                  <Plus size={16} /> {t.addItem}
-                </button>
-              </div>
-              
-              <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                {data.items.map((item, index) => (
-                  <div key={item.id} className="p-4 border border-gray-100 rounded-2xl bg-gray-50/50 hover:bg-gray-50 transition-colors relative group">
-                    <button 
-                      onClick={() => removeItem(item.id)}
-                      className="absolute -top-2 -right-2 bg-white text-red-500 hover:bg-red-50 p-1.5 rounded-full shadow-sm border border-gray-100 transition-opacity"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                      <div className="sm:col-span-12">
-                        <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.particulars}</label>
-                        <input type="text" value={item.particulars} onChange={e => handleItemChange(item.id, 'particulars', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.itemName} />
-                      </div>
-                      <div className="grid grid-cols-2 sm:contents gap-3">
-                        <div className="sm:col-span-4">
-                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.dimension}</label>
-                          <input type="text" value={item.dimension} onChange={e => handleItemChange(item.id, 'dimension', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.size} />
+            {(!data.type || data.type === 'standard') ? (
+              <div className="pt-4 border-t border-gray-200">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-3">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold text-gray-800">{t.items}</h3>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded-md">
+                      <input 
+                        type="checkbox" 
+                        checked={data.showTotal !== false} 
+                        onChange={e => setData({...data, showTotal: e.target.checked})} 
+                        className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                      />
+                      Show Total
+                    </label>
+                  </div>
+                  <button onClick={addItem} className="text-base bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1">
+                    <Plus size={16} /> {t.addItem}
+                  </button>
+                </div>
+                
+                <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                  {data.items.map((item, index) => (
+                    <div key={item.id} className="p-4 border border-gray-100 rounded-2xl bg-gray-50/50 hover:bg-gray-50 transition-colors relative group">
+                      <button 
+                        onClick={() => removeItem(item.id)}
+                        className="absolute -top-2 -right-2 bg-white text-red-500 hover:bg-red-50 p-1.5 rounded-full shadow-sm border border-gray-100 transition-opacity"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                        <div className="sm:col-span-12">
+                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.particulars}</label>
+                          <input type="text" value={item.particulars} onChange={e => handleItemChange(item.id, 'particulars', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.itemName} />
                         </div>
-                        <div className="sm:col-span-4">
-                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.qty}</label>
-                          <input type="number" value={item.qty} onChange={e => handleItemChange(item.id, 'qty', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
+                        <div className="grid grid-cols-2 sm:contents gap-3">
+                          <div className="sm:col-span-4">
+                            <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.dimension}</label>
+                            <input type="text" value={item.dimension} onChange={e => handleItemChange(item.id, 'dimension', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder={t.size} />
+                          </div>
+                          <div className="sm:col-span-4">
+                            <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.qty}</label>
+                            <input type="number" value={item.qty} onChange={e => handleItemChange(item.id, 'qty', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
+                          </div>
+                          <div className="sm:col-span-4">
+                            <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.sqFeet}</label>
+                            <input type="number" value={item.squareFeet} onChange={e => handleItemChange(item.id, 'squareFeet', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
+                          </div>
                         </div>
-                        <div className="sm:col-span-4">
-                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.sqFeet}</label>
-                          <input type="number" value={item.squareFeet} onChange={e => handleItemChange(item.id, 'squareFeet', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 sm:contents gap-3">
-                        <div className="sm:col-span-4">
-                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.rate}</label>
-                          <input type="number" value={item.rate} onChange={e => handleItemChange(item.id, 'rate', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white font-semibold text-blue-600" />
-                        </div>
-                        <div className="sm:col-span-4">
-                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.amount}</label>
-                          <input type="number" value={item.amount} onChange={e => handleItemChange(item.id, 'amount', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-100 font-bold" readOnly />
-                        </div>
-                        <div className="sm:col-span-4">
-                          <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.remark}</label>
-                          <input type="text" value={item.remark} onChange={e => handleItemChange(item.id, 'remark', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="..." />
+                        <div className="grid grid-cols-2 sm:contents gap-3">
+                          <div className="sm:col-span-4">
+                            <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.rate}</label>
+                            <input type="number" value={item.rate} onChange={e => handleItemChange(item.id, 'rate', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white font-semibold text-blue-600" />
+                          </div>
+                          <div className="sm:col-span-4">
+                            <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.amount}</label>
+                            <input type="number" value={item.amount} onChange={e => handleItemChange(item.id, 'amount', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-100 font-bold" readOnly />
+                          </div>
+                          <div className="sm:col-span-4">
+                            <label className="block text-sm uppercase tracking-wider font-bold text-gray-500 mb-1">{t.remark}</label>
+                            <input type="text" value={item.remark} onChange={e => handleItemChange(item.id, 'remark', e.target.value)} className="w-full p-2 text-base border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="..." />
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="pt-4 border-t border-gray-200">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-3">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold text-gray-800">Custom Columns & Data</h3>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded-md">
+                      <input 
+                        type="checkbox" 
+                        checked={data.showTotal !== false} 
+                        onChange={e => setData({...data, showTotal: e.target.checked})} 
+                        className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                      />
+                      Show Total
+                    </label>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={addCustomRow} className="text-sm bg-blue-50 text-blue-600 px-3 py-1.5 rounded-md hover:bg-blue-100 flex items-center gap-1 font-medium">
+                      <Plus size={16} /> Add Row
+                    </button>
+                    {!showColForm && (
+                      <button 
+                        onClick={() => setShowColForm(true)}
+                        className="text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-md hover:bg-indigo-100 flex items-center gap-1 font-medium"
+                      >
+                        <Plus size={16} /> Add Column
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {showColForm && (
+                  <div className="mb-4 bg-gray-50 border border-gray-200 rounded-lg p-3 flex flex-col sm:flex-row items-start sm:items-end gap-3">
+                    <div className="flex-1 w-full">
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Column Name</label>
+                      <input 
+                        type="text" 
+                        value={newColName} 
+                        onChange={e => setNewColName(e.target.value)} 
+                        autoFocus
+                        className="w-full p-2 border border-gray-200 rounded-md outline-none focus:ring-2 focus:ring-indigo-500" 
+                        placeholder="e.g. Dimensions" 
+                      />
+                    </div>
+                    <div className="w-full sm:w-auto">
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Type</label>
+                      <select 
+                        value={newColType} 
+                        onChange={e => setNewColType(e.target.value as 'text' | 'number')}
+                        className="w-full sm:w-32 p-2 border border-gray-200 rounded-md outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="text">Text</option>
+                        <option value="number">Number (Price/Qty)</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <button 
+                        onClick={() => {
+                          if (newColName.trim()) {
+                            addCustomColumn(newColName.trim(), newColType);
+                            setNewColName('');
+                            setNewColType('text');
+                            setShowColForm(false);
+                          } else {
+                            toast.error(language === 'en' ? 'Please enter a column name' : 'Column Name ကိုထည့်ပေးပါ');
+                          }
+                        }}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium whitespace-nowrap"
+                      >
+                        Add
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setShowColForm(false);
+                          setNewColName('');
+                        }}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="overflow-x-auto pb-4 custom-scrollbar">
+                  <table className="w-full border-collapse border border-gray-200">
+                    {(data.customColumns || []).length > 0 && (
+                      <thead className="bg-gray-50">
+                        <tr>
+                          {(data.customColumns || []).map(col => (
+                            <th key={col.id} className="border border-gray-200 px-3 py-2 text-left text-sm font-semibold text-gray-700 relative group min-w-[200px]">
+                              <div className="flex items-center gap-2 pr-8">
+                                <input 
+                                  type="text"
+                                  value={col.name}
+                                  onChange={(e) => updateCustomColumn(col.id, { name: e.target.value })}
+                                  className="bg-transparent border-none outline-none font-semibold text-gray-700 w-full placeholder-gray-400 focus:ring-1 focus:ring-gray-300 rounded px-1 -mx-1"
+                                  placeholder="Column Name"
+                                />
+                                <span className="text-[10px] uppercase bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded flex-shrink-0">
+                                  {col.type}
+                                </span>
+                              </div>
+                              <button 
+                                onClick={() => removeCustomColumn(col.id)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded"
+                                title="Remove Column"
+                              >
+                                <X size={14} />
+                              </button>
+                            </th>
+                          ))}
+                          <th className="border border-gray-200 w-12 text-center bg-gray-50"></th>
+                        </tr>
+                      </thead>
+                    )}
+                    <tbody>
+                      {(!data.customRows || data.customRows.length === 0) && (
+                        <tr>
+                          <td colSpan={(data.customColumns?.length || 0) + 1} className="p-4 text-center text-gray-500 text-sm italic">
+                            No rows added. Click "Add Row" to start.
+                          </td>
+                        </tr>
+                      )}
+                      {(data.customRows || []).map(row => (
+                        <tr key={row.id}>
+                          {(!data.customColumns || data.customColumns.length === 0) && (
+                            <td className="border border-gray-200 p-0 relative">
+                              <input 
+                                type="text"
+                                value={row['_text'] || ''}
+                                onChange={e => handleCustomRowChange(row.id, '_text', e.target.value)}
+                                className="w-full p-2 text-base outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 text-left"
+                                placeholder="Enter text..."
+                              />
+                            </td>
+                          )}
+                          {(data.customColumns || []).map(col => (
+                            <td key={col.id} className="border border-gray-200 p-0 relative">
+                              <input 
+                                type={col.type === 'number' ? 'number' : 'text'}
+                                value={row[col.id] || ''}
+                                onChange={e => handleCustomRowChange(row.id, col.id, e.target.value)}
+                                className={`w-full p-2 text-base outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 ${col.type === 'number' ? 'text-right' : 'text-left'}`}
+                              />
+                            </td>
+                          ))}
+                          <td className="border border-gray-200 p-0 text-center w-10">
+                            <button 
+                              onClick={() => removeCustomRow(row.id)}
+                              className="p-2 text-red-500 hover:bg-red-50 w-full h-full flex justify-center items-center transition-colors outline-none"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="pt-4 border-t border-gray-200">
               <h3 className="text-xl font-bold text-gray-800 mb-3">{t.discount}</h3>
@@ -996,7 +1341,7 @@ export default function App() {
           <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-gray-200">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
               <h2 className="text-xl sm:text-2xl font-bold text-gray-800">{t.preview}</h2>
-              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto items-center">
                 <select 
                   value={orientation}
                   onChange={(e) => setOrientation(e.target.value as 'portrait' | 'landscape')}
@@ -1015,22 +1360,39 @@ export default function App() {
             </div>
             
             {/* The A4 Document Container */}
-            <div className="w-full overflow-x-auto pb-8 custom-scrollbar">
-              <div className="shadow-xl mx-auto" style={{ width: 'fit-content' }}>
+            <div 
+              ref={containerRef}
+              className="w-full overflow-auto custom-scrollbar bg-gray-50 flex justify-center p-4 lg:p-8 rounded-lg border border-gray-200" 
+              style={{ maxHeight: '800px', touchAction: 'pan-x pan-y' }}
+            >
+              <div style={{ 
+                width: orientation === 'portrait' ? 793 * zoom : 1122 * zoom, 
+                minHeight: orientation === 'portrait' ? 1122 * zoom : 793 * zoom,
+                transition: 'all 0.2s ease-out'
+              }}>
                 <div 
-                  ref={previewRef}
-                  className="preview-container transition-all duration-300"
+                  className="shadow-xl" 
                   style={{ 
-                  backgroundColor: '#ffffff',
-                  width: orientation === 'portrait' ? '793px' : '1122px', 
-                  minWidth: orientation === 'portrait' ? '793px' : '1122px',
-                  minHeight: orientation === 'portrait' ? '1122px' : '793px',
-                  padding: '40px 50px',
-                  color: '#000000',
-                  fontFamily: '"Times New Roman", Times, serif',
-                  boxSizing: 'border-box'
-                }}
-              >
+                    width: 'fit-content',
+                    transform: `scale(${zoom})`,
+                    transformOrigin: 'top left',
+                    transition: 'transform 0.2s ease-out'
+                  }}
+                >
+                  <div 
+                    ref={previewRef}
+                    className="preview-container"
+                    style={{ 
+                    backgroundColor: '#ffffff',
+                    width: orientation === 'portrait' ? '793px' : '1122px', 
+                    minWidth: orientation === 'portrait' ? '793px' : '1122px',
+                    minHeight: orientation === 'portrait' ? '1122px' : '793px',
+                    padding: '40px 50px',
+                    color: '#000000',
+                    fontFamily: '"Times New Roman", Times, serif',
+                    boxSizing: 'border-box'
+                  }}
+                >
               {/* Header */}
               <div className="mt-6 mb-8 flex justify-center w-full">
                 {data.headerImage ? (
@@ -1049,7 +1411,7 @@ export default function App() {
               </div>
 
               {/* Table */}
-              {(() => {
+              {(!data.type || data.type === 'standard') ? (() => {
                 const hasRemarks = data.items.some(item => item.remark && item.remark.trim() !== '');
                 return (
                   <table className="w-full border-collapse border border-[#000000] mb-6 text-[14px] text-[#000000]">
@@ -1079,30 +1441,87 @@ export default function App() {
                         </tr>
                       ))}
                       {/* Total Rows */}
-                      {Number(data.discount) > 0 ? (
-                        <>
-                          <tr className="border-b border-[#000000] font-bold break-inside-avoid">
-                            <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">Sub Total</td>
+                      {data.showTotal !== false && (
+                        Number(data.discount) > 0 ? (
+                          <>
+                            <tr className="border-b border-[#000000] font-bold break-inside-avoid">
+                              <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">Sub Total</td>
+                              <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{totalAmount.toLocaleString()}</td>
+                              {hasRemarks && <td className="px-2 py-1.5"></td>}
+                            </tr>
+                            <tr className="border-b border-[#000000] font-bold break-inside-avoid" style={{ color: '#dc2626' }}>
+                              <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.discount}</td>
+                              <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>- {Number(data.discount).toLocaleString()}</td>
+                              {hasRemarks && <td className="px-2 py-1.5"></td>}
+                            </tr>
+                            <tr className="font-bold break-inside-avoid">
+                              <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
+                              <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{finalTotal.toLocaleString()}</td>
+                              {hasRemarks && <td className="px-2 py-1.5"></td>}
+                            </tr>
+                          </>
+                        ) : (
+                          <tr className="font-bold break-inside-avoid">
+                            <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
                             <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{totalAmount.toLocaleString()}</td>
                             {hasRemarks && <td className="px-2 py-1.5"></td>}
                           </tr>
-                          <tr className="border-b border-[#000000] font-bold break-inside-avoid" style={{ color: '#dc2626' }}>
-                            <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.discount}</td>
-                            <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>- {Number(data.discount).toLocaleString()}</td>
-                            {hasRemarks && <td className="px-2 py-1.5"></td>}
-                          </tr>
-                          <tr className="font-bold break-inside-avoid">
-                            <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
-                            <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{finalTotal.toLocaleString()}</td>
-                            {hasRemarks && <td className="px-2 py-1.5"></td>}
-                          </tr>
-                        </>
-                      ) : (
-                        <tr className="font-bold break-inside-avoid">
-                          <td colSpan={6} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
-                          <td className={`${hasRemarks ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-right`}>{totalAmount.toLocaleString()}</td>
-                          {hasRemarks && <td className="px-2 py-1.5"></td>}
+                        )
+                      )}
+                    </tbody>
+                  </table>
+                );
+              })() : (() => {
+                const totalAmount = getCustomTotalAmount();
+                const finalTotal = totalAmount - (Number(data.discount) || 0);
+                const columns = data.customColumns || [];
+                return (
+                  <table className="w-full border-collapse border border-[#000000] mb-6 text-[14px] text-[#000000]">
+                    {columns.length > 0 && (
+                      <thead className="font-bold">
+                        <tr className="border-b border-[#000000]">
+                          {columns.map((col, index) => (
+                            <th key={col.id} className={`${index < columns.length - 1 ? 'border-r border-[#000000]' : ''} px-2 py-1.5 text-center`}>{col.name}</th>
+                          ))}
                         </tr>
+                      </thead>
+                    )}
+                    <tbody>
+                      {(data.customRows || []).map(row => (
+                        <tr key={row.id} className="border-b border-[#000000] break-inside-avoid">
+                          {columns.length === 0 && (
+                            <td className="px-2 py-1.5 text-left">{row['_text']}</td>
+                          )}
+                          {columns.map((col, index) => (
+                            <td key={col.id} className={`${index < columns.length - 1 ? 'border-r border-[#000000]' : ''} px-2 py-1.5 ${col.type === 'number' ? 'text-right' : 'text-left'}`}>
+                              {col.type === 'number' ? (row[col.id] ? Number(row[col.id]).toLocaleString() : '-') : row[col.id]}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {/* Total Rows */}
+                      {data.showTotal !== false && columns.length > 0 && (
+                        Number(data.discount) > 0 ? (
+                          <>
+                            <tr className="border-b border-[#000000] font-bold break-inside-avoid">
+                              <td colSpan={Math.max(1, columns.length - 1)} className="border-r border-[#000000] px-2 py-1.5 text-center">Sub Total</td>
+                              <td className="px-2 py-1.5 text-right">{totalAmount.toLocaleString()}</td>
+                            </tr>
+                            <tr className="border-b border-[#000000] font-bold break-inside-avoid" style={{ color: '#dc2626' }}>
+                              <td colSpan={Math.max(1, columns.length - 1)} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.discount}</td>
+                              <td className="px-2 py-1.5 text-right">- {Number(data.discount).toLocaleString()}</td>
+                            </tr>
+                            <tr className="font-bold break-inside-avoid">
+                              <td colSpan={Math.max(1, columns.length - 1)} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
+                              <td className="px-2 py-1.5 text-right">{finalTotal.toLocaleString()}</td>
+                            </tr>
+                          </>
+                        ) : (
+                          <tr className="font-bold break-inside-avoid">
+                            <td colSpan={Math.max(1, columns.length - 1)} className="border-r border-[#000000] px-2 py-1.5 text-center">{t.total}</td>
+                            <td className="px-2 py-1.5 text-right">{totalAmount.toLocaleString()}</td>
+                          </tr>
+                        )
                       )}
                     </tbody>
                   </table>
@@ -1140,6 +1559,7 @@ export default function App() {
       </div>
       </div>
       </div>
+      </div>
       )}
 
       {/* Saved Quotations Modal */}
@@ -1158,12 +1578,31 @@ export default function App() {
               ) : (
                 <div className="space-y-3">
                   {savedQuotations.map(q => {
-                    const qTotal = q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+                    const qTotalAmount = (!q.type || q.type === 'standard') 
+                      ? q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+                      : (() => {
+                          const cols = q.customColumns || [];
+                          const numberColIds = cols.filter(c => c.type === 'number').map(c => c.id);
+                          let total = 0;
+                          (q.customRows || []).forEach(row => {
+                            numberColIds.forEach(colId => {
+                              total += (Number(row[colId]) || 0);
+                            });
+                          });
+                          return total;
+                        })();
+                        
+                    const finalTotal = qTotalAmount - (Number(q.discount) || 0);
                     return (
                       <div key={q.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
                         <div>
-                          <div className="font-semibold text-gray-800">{q.quotationNumber || t.untitled}</div>
-                          <div className="text-sm text-gray-500">{t.date}: {q.date} • {t.total}: {(q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) - (Number(q.discount) || 0)).toLocaleString()} Ks</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-800">{q.quotationNumber || t.untitled}</span>
+                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${(!q.type || q.type === 'standard') ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                              {(!q.type || q.type === 'standard') ? 'Standard' : 'Custom'}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-500">{t.date}: {q.date} • {t.total}: {finalTotal.toLocaleString()} Ks</div>
                         </div>
                         <div className="flex gap-2 w-full sm:w-auto">
                           <button 

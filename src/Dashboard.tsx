@@ -40,18 +40,34 @@ export function Dashboard({ quotations, language }: DashboardProps) {
     });
 
     filteredQuotations.forEach(q => {
-      const qTotal = q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) - (Number(q.discount) || 0);
-      totalAmount += qTotal;
-      totalItems += q.items.length;
+      let qTotalAmount = 0;
+      let qItemsLength = 0;
 
-      // Track item usage by quantity
-      q.items.forEach(item => {
-        const name = item.particulars?.trim();
-        const qty = Number(item.qty) || 0;
-        if (name && qty > 0) {
-          itemUsageMap[name] = (itemUsageMap[name] || 0) + qty;
-        }
-      });
+      if (!q.type || q.type === 'standard') {
+        qTotalAmount = q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+        qItemsLength = q.items.length;
+        // Track item usage by quantity
+        q.items.forEach(item => {
+          const name = item.particulars?.trim();
+          const qty = Number(item.qty) || 0;
+          if (name && qty > 0) {
+            itemUsageMap[name] = (itemUsageMap[name] || 0) + qty;
+          }
+        });
+      } else {
+        const cols = q.customColumns || [];
+        const numberColIds = cols.filter(c => c.type === 'number').map(c => c.id);
+        (q.customRows || []).forEach(row => {
+          numberColIds.forEach(colId => {
+            qTotalAmount += (Number(row[colId]) || 0);
+          });
+        });
+        qItemsLength = (q.customRows || []).length;
+      }
+
+      const qTotal = qTotalAmount - (Number(q.discount) || 0);
+      totalAmount += qTotal;
+      totalItems += qItemsLength;
 
       // Parse date (assuming DD.MM.YYYY format from the app)
       let dateObj = new Date();
@@ -290,12 +306,31 @@ export function Dashboard({ quotations, language }: DashboardProps) {
             </thead>
             <tbody>
               {stats.filteredQuotations.slice(0, 5).map((q) => {
-                const total = q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) - (Number(q.discount) || 0);
+                const totalAmount = (!q.type || q.type === 'standard') 
+                  ? q.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+                  : (() => {
+                      const cols = q.customColumns || [];
+                      const numberColIds = cols.filter(c => c.type === 'number').map(c => c.id);
+                      let total = 0;
+                      (q.customRows || []).forEach(row => {
+                        numberColIds.forEach(colId => {
+                          total += (Number(row[colId]) || 0);
+                        });
+                      });
+                      return total;
+                    })();
+                const total = totalAmount - (Number(q.discount) || 0);
+                const itemsLength = (!q.type || q.type === 'standard') ? q.items.length : (q.customRows || []).length;
                 return (
                   <tr key={q.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                    <td className="py-3 pr-4 font-medium text-gray-900 whitespace-nowrap">{q.quotationNumber || t.untitled}</td>
+                    <td className="py-3 pr-4 font-medium text-gray-900 whitespace-nowrap">
+                      {q.quotationNumber || t.untitled}
+                      <span className={`ml-2 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full ${(!q.type || q.type === 'standard') ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                        {(!q.type || q.type === 'standard') ? 'Standard' : 'Custom'}
+                      </span>
+                    </td>
                     <td className="py-3 pr-4 text-gray-600 whitespace-nowrap">{q.date}</td>
-                    <td className="py-3 pr-4 text-gray-600 whitespace-nowrap">{q.items.length}</td>
+                    <td className="py-3 pr-4 text-gray-600 whitespace-nowrap">{itemsLength}</td>
                     <td className="py-3 text-right font-medium text-gray-900 whitespace-nowrap">{formatCurrency(total)}</td>
                   </tr>
                 );
